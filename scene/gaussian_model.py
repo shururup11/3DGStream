@@ -88,7 +88,7 @@ class GaussianModel:
         self.spatial_lr_scale = 0
         self.setup_functions()
 
-    def capture(self):
+    def capture(self):  # 모델 상태 저장
         return (
             self.active_sh_degree,
             self._xyz,
@@ -104,7 +104,7 @@ class GaussianModel:
             self.spatial_lr_scale,
         )
     
-    def restore(self, model_args, training_args):
+    def restore(self, model_args, training_args):   # 모델 상태 복원
         (self.active_sh_degree, 
         self._xyz, 
         self._features_dc, 
@@ -122,7 +122,7 @@ class GaussianModel:
         self.denom = denom
         self.optimizer.load_state_dict(opt_dict)
 
-    @property
+    @property                                                    # 위치정보를 가져올 때 new_가 있으면 new_를 가져오고, added_가 있으면 기존의 것과 더해서 반환, 기본적으로는 반환
     def get_scaling(self):
         if self._new_scaling is not None:
             return self._new_scaling
@@ -141,7 +141,7 @@ class GaussianModel:
             return self.rotation_activation(self._rotation)
     
     @property
-    def get_xyz(self):
+    def get_xyz(self):  
         if self._new_xyz is not None:
             return self._new_xyz
         elif self._added_xyz is not None:
