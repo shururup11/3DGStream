@@ -684,9 +684,9 @@ class GaussianModel:
         mask, self._d_xyz, self._d_rot = self.ntc(self._xyz)
         
         self._new_xyz = self._d_xyz + self._xyz
-        self._new_rot = self.rotation_compose(self._rotation, self._d_rot)
+        self._new_rot = self.rotation_compose(self._rotation, self._d_rot)            # 쿼터니안 곱셈
         if self._rotate_sh == True:
-            self._new_feature = torch.cat((self._features_dc, self._features_rest), dim=1) # [N, SHs, RGB]
+            self._new_feature = torch.cat((self._features_dc, self._features_rest), dim=1) # [N, SHs, RGB] # SH 계수들을 결합하여 new feature로 만든다.
                     
             # self._d_rot_matrix=build_rotation(self._d_rot)
             # self._new_feature[mask][:,1:4,0] = rotate_sh_by_matrix(self._features_rest[mask][...,0],1,self._d_rot_matrix[mask])
@@ -694,12 +694,12 @@ class GaussianModel:
             # self._new_feature[mask][:,1:4,2] = rotate_sh_by_matrix(self._features_rest[mask][...,2],1,self._d_rot_matrix[mask])
             
             # This is a bit faster...      
-            permuted_feature = self._new_feature.permute(0, 2, 1)[mask] # [N, RGB, SHs]
-            reshaped_feature = permuted_feature.reshape(-1,4)
-            repeated_quat = self.rotation_activation(self._d_rot[mask]).repeat(3, 1)
-            rotated_reshaped_feature = rotate_sh_by_quaternion(sh=reshaped_feature[...,1:],l=1,q=repeated_quat) # [3N, SHs(l=1)]
+            permuted_feature = self._new_feature.permute(0, 2, 1)[mask]               # [N,SH,RGB] -> [N, RGB, SHs]
+            reshaped_feature = permuted_feature.reshape(-1,4)                         # l이 0일때 1개 + l이 1일때 3개, 총 4개
+            repeated_quat = self.rotation_activation(self._d_rot[mask]).repeat(3, 1)  # self.rotation_activation = torch.nn.functional.normalize
+            rotated_reshaped_feature = rotate_sh_by_quaternion(sh=reshaped_feature[...,1:],l=1,q=repeated_quat) # [3N, SHs(l=1)] # 
             rotated_permuted_feature = rotated_reshaped_feature.reshape(-1,3,3) # [N, RGB, SHs(l=1)]
-            self._new_feature[mask][:,1:4]=rotated_permuted_feature.permute(0,2,1)  
+            self._new_feature[mask][:,1:4]=rotated_permuted_feature.permute(0,2,1) 
 
 
 
