@@ -345,8 +345,8 @@ class GaussianModel:
 
     def _prune_optimizer(self, mask):
         optimizable_tensors = {}
-        for group in self.optimizer.param_groups:
-            stored_state = self.optimizer.state.get(group['params'][0], None)
+        for group in self.optimizer.param_groups:  # 옵티마이저의 파라미터 그룸을 순회한다.
+            stored_state = self.optimizer.state.get(group['params'][0], None)  # 과거 학습정보를 같이 MASK를 적용해서 삭제제
             if stored_state is not None:
                 stored_state["exp_avg"] = stored_state["exp_avg"][mask]
                 stored_state["exp_avg_sq"] = stored_state["exp_avg_sq"][mask]
@@ -362,7 +362,7 @@ class GaussianModel:
         return optimizable_tensors
 
     def prune_points(self, mask):
-        valid_points_mask = ~mask
+        valid_points_mask = ~mask  # mask != true 인 가우시안들이 유효한 가우시안들임
         optimizable_tensors = self._prune_optimizer(valid_points_mask)
 
         self._xyz = optimizable_tensors["xyz"]
@@ -420,38 +420,40 @@ class GaussianModel:
         self.denom = torch.zeros((self.get_xyz.shape[0], 1), device="cuda")
         self.max_radii2D = torch.zeros((self.get_xyz.shape[0]), device="cuda")
 
-    def densify_and_split(self, grads, grad_threshold, scene_extent, N=2):
+    def densify_and_split(self, grads, grad_threshold, scene_extent, N=2): # N=2 한개의 가우시안을 2개 복제 
         n_init_points = self.get_xyz.shape[0]
         # Extract points that satisfy the gradient condition
         padded_grad = torch.zeros((n_init_points), device="cuda")
-        padded_grad[:grads.shape[0]] = grads.squeeze()
-        selected_pts_mask = torch.where(padded_grad >= grad_threshold, True, False)
+        padded_grad[:grads.shape[0]] = grads.squeeze()  # gradient의 크기가 가우시안의 개수보다 작을 수도 있기 때문에 0으로 패딩
+        selected_pts_mask = torch.where(padded_grad >= grad_threshold, True, False) # grad_threshold 보다 큰 grad 를 선택
+        
         selected_pts_mask = torch.logical_and(selected_pts_mask,
-                                              torch.max(self.get_scaling, dim=1).values > self.percent_dense*scene_extent)
+                                              torch.max(self.get_scaling, dim=1).values > self.percent_dense*scene_extent) # 크기가 작은 가우시안 필터
 
-        stds = self.get_scaling[selected_pts_mask].repeat(N,1)
-        means =torch.zeros((stds.size(0), 3),device="cuda")
-        samples = torch.normal(mean=means, std=stds)
-        rots = build_rotation(self._rotation[selected_pts_mask]).repeat(N,1,1)
-        new_xyz = torch.bmm(rots, samples.unsqueeze(-1)).squeeze(-1) + self.get_xyz[selected_pts_mask].repeat(N, 1)
-        new_scaling = self.scaling_inverse_activation(self.get_scaling[selected_pts_mask].repeat(N,1) / (0.8*N))
-        new_rotation = self._rotation[selected_pts_mask].repeat(N,1)
-        new_features_dc = self._features_dc[selected_pts_mask].repeat(N,1,1)
-        new_features_rest = self._features_rest[selected_pts_mask].repeat(N,1,1)
-        new_opacity = self._opacity[selected_pts_mask].repeat(N,1)
+        stds = self.get_scaling[selected_pts_mask].repeat(N,1) # 가우시안을 2개로 분열 (N=2)
+        means =torch.zeros((stds.size(0), 3),device="cuda") # 평균 : 0
+        samples = torch.normal(mean=means, std=stds) # 복제된 가우시안들이 기존 가우시안 주변에서 랜덤하게 배치
+        
+        rots = build_rotation(self._rotation[selected_pts_mask]).repeat(N,1,1) # 기존 가우시안의 회전 정보를 가져와서 2배 복제
+        new_xyz = torch.bmm(rots, samples.unsqueeze(-1)).squeeze(-1) + self.get_xyz[selected_pts_mask].repeat(N, 1) # rots, samples 를 이용해서 위치를 변형
+        new_scaling = self.scaling_inverse_activation(self.get_scaling[selected_pts_mask].repeat(N,1) / (0.8*N)) #가우시안의 크기를 0.8/2 배 축소
+        new_rotation = self._rotation[selected_pts_mask].repeat(N,1) # 회전 값은 그대로 사용
+        new_features_dc = self._features_dc[selected_pts_mask].repeat(N,1,1) # SH 도 그대로 사용
+        new_features_rest = self._features_rest[selected_pts_mask].repeat(N,1,1) 
+        new_opacity = self._opacity[selected_pts_mask].repeat(N,1) # 투명도 값도 그대로 사용
 
-        self.densification_postfix(new_xyz, new_features_dc, new_features_rest, new_opacity, new_scaling, new_rotation)
+        self.densification_postfix(new_xyz, new_features_dc, new_features_rest, new_opacity, new_scaling, new_rotation) # 내부 데이터에 추가한다.
 
         prune_filter = torch.cat((selected_pts_mask, torch.zeros(N * selected_pts_mask.sum(), device="cuda", dtype=bool)))
         self.prune_points(prune_filter)
 
     def densify_and_clone(self, grads, grad_threshold, scene_extent):
         # Extract points that satisfy the gradient condition
-        selected_pts_mask = torch.where(torch.norm(grads, dim=-1) >= grad_threshold, True, False)
+        selected_pts_mask = torch.where(torch.norm(grads, dim=-1) >= grad_threshold, True, False) # gradient 가 큰 가우시안에 대해서 
         selected_pts_mask = torch.logical_and(selected_pts_mask,
-                                              torch.max(self.get_scaling, dim=1).values <= self.percent_dense*scene_extent)
+                                              torch.max(self.get_scaling, dim=1).values <= self.percent_dense*scene_extent) # 크기가 너무 큰 것 제외
         
-        new_xyz = self._xyz[selected_pts_mask]
+        new_xyz = self._xyz[selected_pts_mask] # 복제
         new_features_dc = self._features_dc[selected_pts_mask]
         new_features_rest = self._features_rest[selected_pts_mask]
         new_opacities = self._opacity[selected_pts_mask]
@@ -461,16 +463,17 @@ class GaussianModel:
         self.densification_postfix(new_xyz, new_features_dc, new_features_rest, new_opacities, new_scaling, new_rotation)
 
     def densify_and_prune(self, max_grad, min_opacity, extent, max_screen_size):
-        prune_mask=(self.denom==0).squeeze()
-        self.prune_points(prune_mask)
-        grads = self.xyz_gradient_accum / self.denom
+        prune_mask=(self.denom==0).squeeze() # denom == 0 사용되지 않는 가우시안
+        self.prune_points(prune_mask) # 제거
+        
+        grads = self.xyz_gradient_accum / self.denom # gradient 계산
         grads[grads.isnan()] = 0.0
 
         self.densify_and_clone(grads, max_grad, extent)
         self.densify_and_split(grads, max_grad, extent)
 
-        prune_mask = (self.get_opacity < min_opacity).squeeze()
-        if max_screen_size:
+        prune_mask = (self.get_opacity < min_opacity).squeeze() # 투명도가 낮은 값 제거
+        if max_screen_size: # 너무 큰 가우시안을 삭제한다.
             big_points_vs = self.max_radii2D > max_screen_size
             big_points_ws = self.get_scaling.max(dim=1).values > 0.1 * extent
             prune_mask = torch.logical_or(torch.logical_or(prune_mask, big_points_vs), big_points_ws)
@@ -697,8 +700,8 @@ class GaussianModel:
             permuted_feature = self._new_feature.permute(0, 2, 1)[mask]               # [N,SH,RGB] -> [N, RGB, SHs]
             reshaped_feature = permuted_feature.reshape(-1,4)                         # l이 0일때 1개 + l이 1일때 3개, 총 4개
             repeated_quat = self.rotation_activation(self._d_rot[mask]).repeat(3, 1)  # self.rotation_activation = torch.nn.functional.normalize
-            rotated_reshaped_feature = rotate_sh_by_quaternion(sh=reshaped_feature[...,1:],l=1,q=repeated_quat) # [3N, SHs(l=1)] # 
-            rotated_permuted_feature = rotated_reshaped_feature.reshape(-1,3,3) # [N, RGB, SHs(l=1)]
+            rotated_reshaped_feature = rotate_sh_by_quaternion(sh=reshaped_feature[...,1:],l=1,q=repeated_quat) # [3N, SHs(l=1)] # l=1 인 부분만 선택, 회전 적용
+            rotated_permuted_feature = rotated_reshaped_feature.reshape(-1,3,3) # [N, RGB, SHs(l=1)]   # 다시 원래 구조로 복구
             self._new_feature[mask][:,1:4]=rotated_permuted_feature.permute(0,2,1) 
 
 
