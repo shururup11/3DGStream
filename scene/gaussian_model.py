@@ -482,6 +482,7 @@ class GaussianModel:
         torch.cuda.empty_cache()
 
     def adding_postfix(self, added_xyz, added_features_dc, added_features_rest, added_opacities, added_scaling, added_rotation):
+        # 새로운 가우시안을 추가
         d = {"added_xyz": added_xyz,
         "added_f_dc": added_features_dc,
         "added_f_rest": added_features_rest,
@@ -506,7 +507,7 @@ class GaussianModel:
         added_mask[-self._added_xyz.shape[0]:]=True
         self._added_mask=added_mask
         
-    def adding_and_clone(self, grads, grad_threshold, scene_extent):
+    def adding_and_clone(self, grads, grad_threshold, scene_extent): # 새로운 가우시안을 추가. (복제x)
         # Extract points that satisfy the gradient condition
         selected_pts_mask = torch.where(torch.norm(grads, dim=-1) >= grad_threshold, True, False)
         selected_pts_mask = torch.logical_and(selected_pts_mask,
